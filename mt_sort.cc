@@ -4,65 +4,95 @@
 
 #include <nan.h>
 
+#include <functional>
 #include <iostream>
-#include <future>
+#include <memory>
+#include <mutex>
+#include <thread>
 
 
-const uint32_t NChangeAlgorithm = 20;
+class AsyncWorker {
+public:
+  AsyncWorker(size_t n = 8): thread_count(n), current_used(0) {};
+  std::unique_ptr<std::thread> async(std::function<void ()>&& lamb);
+private:
+  size_t thread_count;
+  size_t current_used;
+  std::mutex lock;
+};
 
-bool operator< (const v8::Local<v8::Value>& a,  const v8::Local<v8::Value>& b) {
-  return a->NumberValue() < b->NumberValue();
+std::unique_ptr<std::thread> AsyncWorker::async(std::function<void ()>&& lamb) {
+  bool shouldNewThread = false;
+  {
+    std::lock_guard<std::mutex> lock_guard(lock);
+    if (thread_count > current_used) {
+      ++current_used;
+      shouldNewThread = true;
+    }
+  }
+  if (shouldNewThread) {
+    return std::make_unique<std::thread>(std::move(lamb));
+  }
+  lamb();
+  return nullptr;
 }
 
+const size_t NChangeAlgorithm = 10;
+
 template <typename T>
-void SortPick(T& obj, uint32_t start, uint32_t end) {
+void SortPick(T obj, size_t start, size_t end) {
   for (auto i = start; i < end; i ++) {
-    auto val = obj->Get(i);
+    auto val = obj[i];
     auto j = i;
     for (; j > start; j--) {
-      auto temp = obj->Get(j - 1);
+      auto temp = obj[j - 1];
       if (temp < val) {
         break;
       }
-      obj->Set(j, temp);
+      obj[j] = temp;
     }
-    obj->Set(j, val);
+    obj[j] = val;
   }
 }
 
 template <typename T>
-void SortInternal(T& obj, uint32_t start, uint32_t end) {
-  std::cout << start << end << std::endl;
+void SortInternal(AsyncWorker& w, T obj, size_t start, size_t end) {
   if (end - start < NChangeAlgorithm)
     return SortPick(obj, start, end);
-  auto pivot = obj->Get(start);
+  auto pivot = obj[start];
   auto last_one = end;
   auto i = start + 1;
   while (i < last_one) {
-    auto val = obj->Get(i);
+    auto val = obj[i];
     if (val < pivot) {
-      obj->Set(i - 1, val);
+      obj[i - 1] = val;
+      ++i;
     } else {
-      obj->Set(i, obj->Get(last_one - 1));
-      obj->Set(last_one - 1, val);
+      obj[i] = obj[last_one - 1];
+      obj[last_one - 1] = val;
       last_one --;
     }
   }
-  obj->Set(last_one - 1, pivot);
-  auto pro1 = std::async(std::launch::async, [=, &obj]() {
-      return SortInternal(obj, start, last_one - 1);
-  });
-  auto pro2 = std::async(std::launch::async, [=, &obj]() {
-      return SortInternal(obj, last_one, end);
-  });
-  pro1.get();
-  pro2.get();
+  obj[last_one - 1] = pivot;
+  std::unique_ptr<std::thread> pro(nullptr); 
+  if (last_one - start > 512) {
+    pro = w.async([=, &w] {
+     SortInternal(w, obj, start, last_one - 1);
+    });
+  } else {
+    SortInternal(w, obj, start, last_one - 1);
+  }
+  SortInternal(w, obj, last_one, end);
+  if (pro.get())
+    pro->join();
 }
 
+
 void Sort(const Nan::FunctionCallbackInfo<v8::Value>& info) {
-  auto array = v8::Local<v8::Array>::Cast(info[0]);
-  SortInternal(array, 0, array->Length());
-  info.GetReturnValue().Set(array);
+  Nan::TypedArrayContents<double> array(info[0]);
+  AsyncWorker worker(8);
+  SortInternal(worker, *array, 0, array.length());
+  info.GetReturnValue().Set(info[0]);
 }
 
 void Init(v8::Local<v8::Object> exports) {
