@@ -13,11 +13,7 @@ const res = sort(arr1)
 console.log('arr done: ', Date.now() - t1);
 
 const t2 = Date.now();
-const res1 = sort(arr2)
+const res1 = arr2.sort()
 console.log('arr2 done: ', Date.now() - t2);
 
-
-// console.log(res1)
-
-// console.log(res);
 module.exports = sort;
