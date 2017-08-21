@@ -4,6 +4,8 @@
 
 #include <nan.h>
 
+#include <stdio.h>
+
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -13,8 +15,20 @@
 
 class AsyncWorker {
 public:
-    AsyncWorker(size_t m, size_t n = 8) : thread_count(n), current_used(0) {
+    AsyncWorker(size_t m, size_t n) : thread_count(n), current_used(1), friend_array(nullptr) {
       min = static_cast<size_t>(m / (n * 1.33));
+    };
+    AsyncWorker(size_t m, bool merge, size_t n) : thread_count(n), current_used(1) {
+      min = static_cast<size_t>(m / (n * 1.33));
+      if (merge) friend_array = new double[m];
+      memset(friend_array, m, 0);
+    };
+    ~AsyncWorker() {
+      if (friend_array) delete[] friend_array;
+    };
+
+    double* GetFriendArray() {
+      return  friend_array;
     };
 
     std::unique_ptr <std::thread> async(std::function<void()> &&lamb);
@@ -28,6 +42,7 @@ private:
     size_t min;
     size_t current_used;
     std::mutex lock;
+    double* friend_array;
 };
 
 std::unique_ptr <std::thread> AsyncWorker::async(std::function<void()> &&lamb) {
@@ -48,6 +63,7 @@ std::unique_ptr <std::thread> AsyncWorker::async(std::function<void()> &&lamb) {
 
 const size_t NChangeAlgorithm = 10;
 
+
 template<typename T>
 void SortPick(T obj, size_t start, size_t end) {
   for (auto i = start; i < end; i++) {
@@ -62,6 +78,37 @@ void SortPick(T obj, size_t start, size_t end) {
     }
     obj[j] = val;
   }
+}
+
+void mergeSort(AsyncWorker &w, double* obj, size_t start, size_t end) {
+  if (end - start < NChangeAlgorithm)
+    return SortPick(obj, start, end);
+  auto mid = (end - start) / 2 + start;
+  auto pro = w.async([=, &w] {
+      mergeSort(w, obj, start, mid - 1);
+  });
+  mergeSort(w, obj, mid, end);
+  if (pro.get())
+    pro->join();
+
+  auto friend_array = w.GetFriendArray();
+  auto i = start;
+  auto j = mid;
+  auto f = start;
+  while ((i < mid) && (j < end)) {
+    if (obj[i] < obj[j]) {
+      friend_array[f++] = obj[i++];
+    } else {
+      friend_array[f++] = obj[j++];
+    }
+  }
+  while (i < mid) {
+    friend_array[f++] = obj[i++];
+  }
+  while (j < end) {
+    friend_array[f++] = obj[j++];
+  }
+  memmove(obj + start, friend_array, end - start);
 }
 
 template<typename T>
@@ -99,8 +146,8 @@ void SortInternal(AsyncWorker &w, T obj, size_t start, size_t end) {
 
 void Sort(const Nan::FunctionCallbackInfo <v8::Value> &info) {
   Nan::TypedArrayContents<double> array(info[0]);
-  AsyncWorker worker(array.length(), std::thread::hardware_concurrency());
-  SortInternal(worker, *array, 0, array.length());
+  AsyncWorker worker(array.length(), true, std::thread::hardware_concurrency());
+  mergeSort(worker, *array, 0, array.length());
   info.GetReturnValue().Set(info[0]);
 }
 
