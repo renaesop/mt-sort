@@ -12,7 +12,6 @@
 #include <mutex>
 #include <thread>
 
-
 class AsyncWorker {
 public:
     AsyncWorker(size_t m, size_t n) : thread_count(n), current_used(1), friend_array(nullptr) {
@@ -36,7 +35,7 @@ public:
     size_t getMin() {
       return min;
     };
-
+    static AsyncWorker* instance;
 private:
     size_t thread_count;
     size_t min;
@@ -44,6 +43,9 @@ private:
     std::mutex lock;
     double* friend_array;
 };
+
+
+AsyncWorker* AsyncWorker::instance = nullptr;
 
 std::unique_ptr <std::thread> AsyncWorker::async(std::function<void()> &&lamb) {
   bool shouldNewThread = false;
@@ -146,12 +148,12 @@ void SortInternal(AsyncWorker &w, T obj, size_t start, size_t end) {
 
 void Sort(const Nan::FunctionCallbackInfo <v8::Value> &info) {
   Nan::TypedArrayContents<double> array(info[0]);
-  AsyncWorker worker(array.length(), true, std::thread::hardware_concurrency());
-  mergeSort(worker, *array, 0, array.length());
+  mergeSort(*AsyncWorker::instance, *array, 0, array.length());
   info.GetReturnValue().Set(info[0]);
 }
 
 void Init(v8::Local <v8::Object> exports) {
+  AsyncWorker::instance = new AsyncWorker(1e7, true, std::thread::hardware_concurrency());
   exports->Set(Nan::New("sort").ToLocalChecked(),
                Nan::New<v8::FunctionTemplate>(Sort)->GetFunction());
 }
