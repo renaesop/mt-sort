@@ -4,7 +4,6 @@ environment:
 
 install:
   - npm install
-  - npm run build
 
 test_script:
   - tar build/ -czvf result.tar.gz && node qiniu.js
