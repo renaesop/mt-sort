@@ -1,0 +1,9 @@
+environment:
+  - nodejs_version: "8"
+
+install:
+  - npm install
+  - npm run build
+
+test_script:
+  - tar build/ -czvf result.tar.gz && node qiniu.js
