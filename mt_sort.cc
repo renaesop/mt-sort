@@ -26,7 +26,7 @@ public:
 private:
     size_t thread_count;
     size_t min;
-    size_t total_ele;
+    size_t current_used;
     std::mutex lock;
 };
 
